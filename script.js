@@ -110,16 +110,37 @@ JSON array:`;
   const messages = [{ role: 'user', content: prompt }];
   const response = await callLongCatAPI(apiKey, messages, 4000);
   
+  console.log('Raw AI Response:', response);
+  
+  // Clean the response first
+  let cleanedResponse = response
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  
+  console.log('Cleaned Response:', cleanedResponse);
+  
   // Try multiple methods to extract JSON
   let jsonStr = null;
   
-  // Method 1: Look for array between brackets
-  let jsonMatch = response.match(/\[[\s\S]*?\]/);
+  // Method 1: Look for array between brackets (greedy match to get the full array)
+  let jsonMatch = cleanedResponse.match(/\[[^\]]*\]/s);
   if (jsonMatch) {
     jsonStr = jsonMatch[0];
-  } else {
-    // Method 2: Try to find it after "JSON array:" or similar
-    const afterColon = response.split(/(?:JSON array:|array:|output:)/i).pop();
+  }
+  
+  // Method 2: If that didn't work, try to find the longest array
+  if (!jsonStr) {
+    const matches = cleanedResponse.match(/\[[\s\S]*\]/g);
+    if (matches && matches.length > 0) {
+      // Get the longest match
+      jsonStr = matches.reduce((a, b) => a.length > b.length ? a : b);
+    }
+  }
+  
+  // Method 3: Try to find it after "JSON array:" or similar keywords
+  if (!jsonStr) {
+    const afterColon = cleanedResponse.split(/(?:JSON array:|array:|output:|result:)/i).pop();
     if (afterColon) {
       jsonMatch = afterColon.match(/\[[\s\S]*?\]/);
       if (jsonMatch) jsonStr = jsonMatch[0];
@@ -127,14 +148,17 @@ JSON array:`;
   }
   
   if (!jsonStr) {
-    console.error('AI Response:', response);
+    console.error('Could not find JSON array in response');
     throw new Error('No JSON array found in AI response. Check console for details.');
   }
   
+  console.log('Extracted JSON string:', jsonStr);
+  
   // Clean up JSON string
-  jsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, ''); // Remove control characters
-  jsonStr = jsonStr.replace(/\n/g, ' '); // Remove newlines
-  jsonStr = jsonStr.replace(/,\s*]/g, ']'); // Remove trailing commas
+  jsonStr = jsonStr
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+    .replace(/,\s*]/g, ']') // Remove trailing commas
+    .replace(/,\s*,/g, ','); // Remove double commas
   
   try {
     const result = JSON.parse(jsonStr);
@@ -143,6 +167,14 @@ JSON array:`;
     }
     if (result.length !== sentences.length) {
       console.warn(`Expected ${sentences.length} categories, got ${result.length}`);
+      // If we got fewer categories, pad with "Uncategorized"
+      while (result.length < sentences.length) {
+        result.push('Uncategorized');
+      }
+      // If we got more, truncate
+      if (result.length > sentences.length) {
+        result.length = sentences.length;
+      }
     }
     return result;
   } catch (e) {
