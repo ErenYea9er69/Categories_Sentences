@@ -4,6 +4,30 @@ let allSentences = [];
 let categorizedSentences = {};
 let categories = [];
 
+// Predefined categories
+const PREDEFINED_CATEGORIES = [
+  "Money-Economy",
+  "Food",
+  "Drinks",
+  "Nature",
+  "Crime-Law",
+  "War",
+  "Technologies",
+  "Family Activity",
+  "Government",
+  "Relationships-Communication",
+  "Fashion-Appearance",
+  "Entertainments",
+  "Science",
+  "Animals",
+  "Places",
+  "Feelings",
+  "School",
+  "Diseases-Medicine",
+  "Work-Job",
+  "Travel-Transportation"
+];
+
 async function extractTextFromPDF(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -57,62 +81,14 @@ function updateProgress(percent, status) {
 function showError(message) {
   const statusDiv = document.getElementById('statusText');
   statusDiv.className = 'status error';
-  statusDiv.textContent = 'âŒ Error: ' + message;
-}
-
-async function identifyCategories(apiKey, sampleSentences) {
-  updateProgress(5, 'Step 1/3: Identifying categories from document...');
-
-  const prompt = `Analyze these sample sentences and identify EXACTLY 25-40 CLEAR and SPECIFIC THEMATIC categories based on the main topics and subjects discussed in the document.
-
-CRITICAL RULES:
-- Create EXACTLY between 25 and 40 categories
-- Categories should be CLEAR, SPECIFIC TOPICS or THEMES
-- Each category should be distinct and not overlap with others
-- Think about the SUBJECT MATTER: What is this sentence about?
-- Use DESCRIPTIVE names that clearly indicate what the category contains
-- Categories should be specific enough to be meaningful but broad enough to contain multiple sentences
-- Use clear, descriptive names (2-5 words)
-- NO special characters, quotes, or symbols in category names
-- Avoid vague or overly general categories
-
-Example of GOOD categories: "Water Transportation and Vessels", "Urban Infrastructure and Buildings", "Food Preparation and Cooking", "Medical Treatment and Healthcare", "Emotional Reactions and Feelings"
-Example of BAD categories: "Items", "Activities", "Things", "Stuff", "General"
-
-Sample sentences:
-${sampleSentences.slice(0, 150).join('\n')}
-
-Analyze the main TOPICS and THEMES across all sentences, then return ONLY a JSON array of 25-40 clear and specific thematic category names.
-Format: ["Category 1", "Category 2", "Category 3", ...]`;
-
-  const messages = [{ role: 'user', content: prompt }];
-  const response = await callLongCatAPI(apiKey, messages, 3000);
-  
-  // Try to extract and parse JSON
-  let jsonMatch = response.match(/\[.*\]/s);
-  if (!jsonMatch) throw new Error('No JSON array found in AI response');
-  
-  let jsonStr = jsonMatch[0];
-  
-  // Clean up common JSON issues
-  jsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, ''); // Remove control characters
-  jsonStr = jsonStr.replace(/\n/g, ' '); // Remove newlines inside strings
-  
-  try {
-    const categories = JSON.parse(jsonStr);
-    console.log('Identified categories:', categories);
-    return categories;
-  } catch (e) {
-    console.error('Failed to parse JSON:', jsonStr);
-    throw new Error('Failed to parse categories from AI response: ' + e.message);
-  }
+  statusDiv.textContent = '❌ Error: ' + message;
 }
 
 async function categorizeBatch(apiKey, sentences, categories, batchIndex, totalBatches) {
-  const percent = 10 + (batchIndex / totalBatches) * 80;
-  updateProgress(percent, `Step 2/3: Categorizing batch ${batchIndex + 1}/${totalBatches}...`);
+  const percent = 10 + (batchIndex / totalBatches) * 85;
+  updateProgress(percent, `Step 2/2: Categorizing batch ${batchIndex + 1}/${totalBatches}...`);
 
-  const prompt = `You must categorize each sentence into ONE category from the list below.
+  const prompt = `You must categorize each sentence into ONE category from the list below. Choose the MOST RELEVANT category based on the main topic or theme of the sentence.
 
 AVAILABLE CATEGORIES:
 ${categories.map((cat, i) => `${i + 1}. ${cat}`).join('\n')}
@@ -120,8 +96,14 @@ ${categories.map((cat, i) => `${i + 1}. ${cat}`).join('\n')}
 SENTENCES TO CATEGORIZE:
 ${sentences.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
-CRITICAL: Return ONLY a JSON array with ${sentences.length} category names. No explanations, no extra text.
-Example format: ["Category Name", "Category Name", "Category Name"]
+CRITICAL INSTRUCTIONS:
+- Return ONLY a JSON array with EXACTLY ${sentences.length} category names
+- Each category name must be EXACTLY as listed above (matching capitalization and hyphens)
+- Choose the single most relevant category for each sentence
+- No explanations, no extra text, no markdown formatting
+- Do not include triple backticks or json code blocks in your response
+
+Example format: ["Money-Economy", "Food", "Nature"]
 
 JSON array:`;
 
@@ -175,7 +157,12 @@ function displayResults() {
   const container = document.getElementById('categoriesContainer');
   container.innerHTML = '';
 
-  for (const [category, sentences] of Object.entries(categorizedSentences)) {
+  // Sort categories by number of sentences (descending)
+  const sortedCategories = Object.entries(categorizedSentences)
+    .filter(function(entry) { return entry[1].length > 0; })
+    .sort(function(a, b) { return b[1].length - a[1].length; });
+
+  for (const [category, sentences] of sortedCategories) {
     const categoryDiv = document.createElement('div');
     categoryDiv.className = 'category';
 
@@ -270,7 +257,9 @@ function downloadAsPDF() {
     doc.setFontSize(10);
     
     let categoryIndex = 1;
-    const sortedCategories = Object.entries(categorizedSentences).sort((a, b) => b[1].length - a[1].length);
+    const sortedCategories = Object.entries(categorizedSentences)
+      .filter(function(entry) { return entry[1].length > 0; })
+      .sort(function(a, b) { return b[1].length - a[1].length; });
     
     // Store TOC entries
     const tocEntries = [];
@@ -448,11 +437,12 @@ async function startProcessing() {
 
     if (allSentences.length === 0) throw new Error('No sentences found in PDF');
 
-    updateProgress(3, `Found ${allSentences.length} sentences. Analyzing...`);
-    categories = await identifyCategories(apiKey, allSentences);
+    // Use predefined categories
+    categories = PREDEFINED_CATEGORIES;
     document.getElementById('totalCategories').textContent = categories.length;
-    updateProgress(10, `Identified ${categories.length} categories`);
+    updateProgress(5, `Using ${categories.length} predefined categories`);
 
+    // Initialize categorized sentences object
     categorizedSentences = {};
     categories.forEach(cat => categorizedSentences[cat] = []);
 
