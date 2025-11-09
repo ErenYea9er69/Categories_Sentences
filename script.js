@@ -25,7 +25,8 @@ const PREDEFINED_CATEGORIES = [
   "School",
   "Diseases-Medicine",
   "Work-Job",
-  "Travel-Transportation"
+  "Travel-Transportation",
+  "Uncategorized"
 ];
 
 async function extractTextFromPDF(file) {
@@ -487,8 +488,17 @@ async function startProcessing() {
 
       const batchCategories = await categorizeBatch(apiKey, batch, categories, i, totalBatches);
       batch.forEach((sentence, idx) => {
-        const category = batchCategories[idx] || 'Uncategorized';
-        if (!categorizedSentences[category]) categorizedSentences[category] = [];
+        let category = batchCategories[idx];
+        
+        // Validate that the category is one of our predefined categories
+        if (!category || !categories.includes(category)) {
+          console.warn(`Invalid category "${category}" for sentence: ${sentence.substring(0, 50)}...`);
+          category = 'Uncategorized';
+        }
+        
+        if (!categorizedSentences[category]) {
+          categorizedSentences[category] = [];
+        }
         categorizedSentences[category].push(sentence);
       });
 
