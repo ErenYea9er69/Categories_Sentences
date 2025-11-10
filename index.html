@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Sentence Categorizer</title>
+  <title>PDF Sentence Categorizer - Enhanced</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <div class="container">
-    <h1>📄 PDF Sentence Categorizer</h1>
+    <h1>📄 Enhanced PDF Sentence Categorizer</h1>
+    <p class="subtitle">AI-powered multi-pass categorization with validation</p>
 
     <div class="config-section">
       <div class="input-group">
@@ -20,7 +19,20 @@
 
       <div class="input-group">
         <label>Batch Size (sentences per request):</label>
-        <input type="number" id="batchSize" value="50" min="10" max="100">
+        <input type="number" id="batchSize" value="25" min="5" max="30">
+        <small>Smaller batches = better accuracy but slower</small>
+      </div>
+
+      <div class="input-group">
+        <label>Number of Validation Passes:</label>
+        <input type="number" id="validationPasses" value="3" min="2" max="5">
+        <small>More passes = better categorization but takes longer</small>
+      </div>
+
+      <div class="input-group">
+        <label>Sample Size for Category Discovery:</label>
+        <input type="number" id="sampleSize" value="500" min="100" max="1000">
+        <small>Larger samples = better category detection</small>
       </div>
 
       <div class="input-group">
@@ -28,7 +40,7 @@
         <input type="file" id="pdfFile" accept=".pdf">
       </div>
 
-      <button class="btn" id="startBtn" onclick="startProcessing()">Start Processing</button>
+      <button class="btn" id="startBtn" onclick="startProcessing()">Start Advanced Processing</button>
     </div>
 
     <div class="progress-section" id="progressSection">
@@ -36,23 +48,33 @@
         <div class="stat-item">Total Sentences: <span class="stat-value" id="totalSentences">0</span></div>
         <div class="stat-item">Categories: <span class="stat-value" id="totalCategories">0</span></div>
         <div class="stat-item">Processed: <span class="stat-value" id="processedCount">0</span></div>
+        <div class="stat-item">Pass: <span class="stat-value" id="currentPass">0</span></div>
+        <div class="stat-item">Confidence: <span class="stat-value" id="confidenceScore">0%</span></div>
       </div>
       <div class="progress-bar">
         <div class="progress-fill" id="progressFill">0%</div>
       </div>
       <div class="status" id="statusText">Initializing...</div>
+      <div id="detailedLog"></div>
     </div>
 
     <div class="results-section" id="resultsSection">
       <div class="download-buttons-top">
         <button class="btn download-btn" onclick="downloadResults()">Download as JSON</button>
         <button class="btn download-btn" onclick="downloadAsPDF()">Download as PDF</button>
+        <button class="btn download-btn" onclick="downloadMismatchesReport()">Download Mismatches Report</button>
       </div>
       <h2>Categorized Results</h2>
+      <div class="summary-stats" id="summaryStats"></div>
       <div id="categoriesContainer"></div>
+      
+      <h2 style="margin-top: 40px; color: #dc3545;">Potential Misclassifications</h2>
+      <div id="mismatchesContainer"></div>
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
