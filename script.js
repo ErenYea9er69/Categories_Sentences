@@ -4,31 +4,6 @@ let allSentences = [];
 let categorizedSentences = {};
 let categories = [];
 
-// Predefined categories
-const PREDEFINED_CATEGORIES = [
-  "Money-Economy",
-  "Food",
-  "Drinks",
-  "Nature",
-  "Crime-Law",
-  "War",
-  "Technologies",
-  "Family Activity",
-  "Government",
-  "Relationships-Communication",
-  "Fashion-Appearance",
-  "Entertainments",
-  "Science",
-  "Animals",
-  "Places",
-  "Feelings",
-  "School",
-  "Diseases-Medicine",
-  "Work-Job",
-  "Travel-Transportation",
-  "Uncategorized"
-];
-
 async function extractTextFromPDF(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -85,9 +60,63 @@ function showError(message) {
   statusDiv.textContent = '❌ Error: ' + message;
 }
 
+async function discoverCategories(apiKey, sampleSentences) {
+  updateProgress(3, 'Step 1/3: AI is discovering natural categories...');
+
+  const prompt = `Analyze these sentences and identify 15-25 broad thematic categories that would cover all the content.
+
+SENTENCES SAMPLE:
+${sampleSentences.slice(0, 100).map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+CATEGORY NAMING GUIDELINES:
+- Use clear, descriptive category names
+- Use Title-Case-With-Hyphens format (e.g., "Money-Economy", "Technology-Innovation", "Health-Medicine")
+- Categories should be broad enough to group multiple sentences
+- Each category should represent a distinct theme or topic
+- Use hyphens to connect related concepts (e.g., "Work-Career", "Food-Nutrition")
+- Examples of good categories: "Science-Research", "Travel-Tourism", "Entertainment-Media", "Family-Relationships", "Nature-Environment"
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY a JSON array of category names
+- Use 15-25 categories that best represent the document's themes
+- No explanations, no extra text, no markdown formatting
+- Do not include triple backticks or json code blocks
+
+Example format: ["Money-Economy", "Technology-Innovation", "Health-Medicine", "Education-Learning"]
+
+JSON array:`;
+
+  const messages = [{ role: 'user', content: prompt }];
+  const response = await callLongCatAPI(apiKey, messages, 3000);
+  
+  console.log('Categories Discovery Response:', response);
+  
+  let cleanedResponse = response
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  
+  let jsonStr = cleanedResponse.match(/\[[\s\S]*?\]/);
+  if (!jsonStr) {
+    throw new Error('Failed to extract categories from AI response');
+  }
+  
+  jsonStr = jsonStr[0]
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .replace(/,\s*]/g, ']')
+    .replace(/,\s*,/g, ',');
+  
+  const discoveredCategories = JSON.parse(jsonStr);
+  
+  // Always add "Uncategorized" as a fallback
+  discoveredCategories.push("Uncategorized");
+  
+  return discoveredCategories;
+}
+
 async function categorizeBatch(apiKey, sentences, categories, batchIndex, totalBatches) {
-  const percent = 10 + (batchIndex / totalBatches) * 85;
-  updateProgress(percent, `Step 2/2: Categorizing batch ${batchIndex + 1}/${totalBatches}...`);
+  const percent = 10 + (batchIndex / totalBatches) * 70;
+  updateProgress(percent, `Step 2/3: Categorizing batch ${batchIndex + 1}/${totalBatches}...`);
 
   const prompt = `You must categorize each sentence into ONE category from the list below. Choose the MOST RELEVANT category based on the main topic or theme of the sentence.
 
@@ -101,10 +130,11 @@ CRITICAL INSTRUCTIONS:
 - Return ONLY a JSON array with EXACTLY ${sentences.length} category names
 - Each category name must be EXACTLY as listed above (matching capitalization and hyphens)
 - Choose the single most relevant category for each sentence
+- If unsure, use "Uncategorized"
 - No explanations, no extra text, no markdown formatting
 - Do not include triple backticks or json code blocks in your response
 
-Example format: ["Money-Economy", "Food", "Nature"]
+Example format: ["Money-Economy", "Technology-Innovation", "Nature-Environment"]
 
 JSON array:`;
 
@@ -113,7 +143,6 @@ JSON array:`;
   
   console.log('Raw AI Response:', response);
   
-  // Clean the response first
   let cleanedResponse = response
     .replace(/```json/gi, '')
     .replace(/```/g, '')
@@ -121,25 +150,19 @@ JSON array:`;
   
   console.log('Cleaned Response:', cleanedResponse);
   
-  // Try multiple methods to extract JSON
   let jsonStr = null;
-  
-  // Method 1: Look for array between brackets (greedy match to get the full array)
   let jsonMatch = cleanedResponse.match(/\[[^\]]*\]/s);
   if (jsonMatch) {
     jsonStr = jsonMatch[0];
   }
   
-  // Method 2: If that didn't work, try to find the longest array
   if (!jsonStr) {
     const matches = cleanedResponse.match(/\[[\s\S]*\]/g);
     if (matches && matches.length > 0) {
-      // Get the longest match
       jsonStr = matches.reduce((a, b) => a.length > b.length ? a : b);
     }
   }
   
-  // Method 3: Try to find it after "JSON array:" or similar keywords
   if (!jsonStr) {
     const afterColon = cleanedResponse.split(/(?:JSON array:|array:|output:|result:)/i).pop();
     if (afterColon) {
@@ -155,11 +178,10 @@ JSON array:`;
   
   console.log('Extracted JSON string:', jsonStr);
   
-  // Clean up JSON string
   jsonStr = jsonStr
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
-    .replace(/,\s*]/g, ']') // Remove trailing commas
-    .replace(/,\s*,/g, ','); // Remove double commas
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .replace(/,\s*]/g, ']')
+    .replace(/,\s*,/g, ',');
   
   try {
     const result = JSON.parse(jsonStr);
@@ -168,11 +190,9 @@ JSON array:`;
     }
     if (result.length !== sentences.length) {
       console.warn(`Expected ${sentences.length} categories, got ${result.length}`);
-      // If we got fewer categories, pad with "Uncategorized"
       while (result.length < sentences.length) {
         result.push('Uncategorized');
       }
-      // If we got more, truncate
       if (result.length > sentences.length) {
         result.length = sentences.length;
       }
@@ -185,12 +205,108 @@ JSON array:`;
   }
 }
 
+async function verifyAndCorrectCategorization(apiKey, categorizedSentences, categories) {
+  updateProgress(85, 'Step 3/3: AI is verifying categorizations...');
+
+  // Get a sample of categorizations to verify (up to 30 sentences from various categories)
+  let sampleData = [];
+  let sampledCategories = Object.keys(categorizedSentences).slice(0, 10);
+  
+  for (const category of sampledCategories) {
+    const sentences = categorizedSentences[category];
+    if (sentences.length > 0) {
+      const samplesToTake = Math.min(3, sentences.length);
+      for (let i = 0; i < samplesToTake; i++) {
+        sampleData.push({
+          sentence: sentences[i],
+          currentCategory: category
+        });
+      }
+    }
+  }
+
+  if (sampleData.length === 0) {
+    return categorizedSentences; // Nothing to verify
+  }
+
+  const prompt = `Review these sentence categorizations and check if they are correctly placed. For each sentence, either confirm the current category or suggest a better one from the available categories.
+
+AVAILABLE CATEGORIES:
+${categories.map((cat, i) => `${i + 1}. ${cat}`).join('\n')}
+
+SENTENCES TO REVIEW:
+${sampleData.map((item, i) => `${i + 1}. [Current: ${item.currentCategory}] "${item.sentence}"`).join('\n\n')}
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY a JSON array with EXACTLY ${sampleData.length} category names
+- For each sentence, return the BEST category (can be the same as current or a better one)
+- Each category must be EXACTLY from the list above
+- No explanations, no extra text, no markdown formatting
+
+Example format: ["Money-Economy", "Technology-Innovation", "Nature-Environment"]
+
+JSON array:`;
+
+  const messages = [{ role: 'user', content: prompt }];
+  
+  try {
+    const response = await callLongCatAPI(apiKey, messages, 3000);
+    
+    let cleanedResponse = response
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+    
+    let jsonStr = cleanedResponse.match(/\[[\s\S]*?\]/);
+    if (!jsonStr) {
+      console.warn('Could not parse verification response, skipping verification step');
+      return categorizedSentences;
+    }
+    
+    jsonStr = jsonStr[0]
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+      .replace(/,\s*]/g, ']')
+      .replace(/,\s*,/g, ',');
+    
+    const verifiedCategories = JSON.parse(jsonStr);
+    
+    // Apply corrections
+    let correctionsMade = 0;
+    for (let i = 0; i < sampleData.length && i < verifiedCategories.length; i++) {
+      const item = sampleData[i];
+      const newCategory = verifiedCategories[i];
+      
+      if (newCategory !== item.currentCategory && categories.includes(newCategory)) {
+        // Remove from old category
+        const oldCatIndex = categorizedSentences[item.currentCategory].indexOf(item.sentence);
+        if (oldCatIndex > -1) {
+          categorizedSentences[item.currentCategory].splice(oldCatIndex, 1);
+        }
+        
+        // Add to new category
+        if (!categorizedSentences[newCategory]) {
+          categorizedSentences[newCategory] = [];
+        }
+        categorizedSentences[newCategory].push(item.sentence);
+        correctionsMade++;
+      }
+    }
+    
+    console.log(`Verification complete: ${correctionsMade} corrections made`);
+    updateProgress(90, `Verification complete: ${correctionsMade} corrections made`);
+    
+  } catch (error) {
+    console.warn('Verification step failed, continuing with original categorization:', error);
+  }
+  
+  return categorizedSentences;
+}
+
 function displayResults() {
   updateProgress(100, 'Complete! Displaying results...');
   const container = document.getElementById('categoriesContainer');
   container.innerHTML = '';
 
-  // Sort categories by number of sentences (descending)
   const sortedCategories = Object.entries(categorizedSentences)
     .filter(function(entry) { return entry[1].length > 0; })
     .sort(function(a, b) { return b[1].length - a[1].length; });
@@ -244,15 +360,12 @@ function downloadAsPDF() {
     const contentWidth = pageWidth - (margin * 2);
     let yPosition = margin;
 
-    // Store page numbers where each category starts for links
     const categoryPages = {};
 
-    // Helper function to add a new page
     function addNewPage() {
       doc.addPage();
       yPosition = margin;
       
-      // Add page number footer
       doc.setFontSize(9);
       doc.setTextColor(128, 128, 128);
       doc.text(
@@ -264,7 +377,6 @@ function downloadAsPDF() {
       doc.setTextColor(0, 0, 0);
     }
 
-    // ============ TITLE PAGE ============
     doc.setFontSize(32);
     doc.setFont(undefined, 'bold');
     doc.text('Categorized Sentences', pageWidth / 2, 80, { align: 'center' });
@@ -278,10 +390,8 @@ function downloadAsPDF() {
     });
     doc.text(`Generated on ${today}`, pageWidth / 2, 95, { align: 'center' });
 
-    // Start TOC on new page
     addNewPage();
 
-    // ============ TABLE OF CONTENTS ============
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
     doc.text('Table of Contents', margin, yPosition);
@@ -294,7 +404,6 @@ function downloadAsPDF() {
       .filter(function(entry) { return entry[1].length > 0; })
       .sort(function(a, b) { return b[1].length - a[1].length; });
     
-    // Store TOC entries
     const tocEntries = [];
     
     for (const [category, sentences] of sortedCategories) {
@@ -302,7 +411,6 @@ function downloadAsPDF() {
         addNewPage();
       }
       
-      // Store the position for later linking
       const tocY = yPosition;
       const tocPage = doc.internal.getNumberOfPages();
       
@@ -313,45 +421,36 @@ function downloadAsPDF() {
         index: categoryIndex
       });
       
-      // Calculate available width for category name
       const countText = `(${sentences.length} sentences)`;
       doc.setFont(undefined, 'normal');
       const countWidth = doc.getTextWidth(countText);
       const availableWidth = contentWidth - countWidth - 10;
       
-      // Wrap category text if needed
       const wrappedCategory = doc.splitTextToSize(`${categoryIndex}. ${category}`, availableWidth);
       
-      // Add the category name
       doc.text(wrappedCategory, margin + 5, yPosition);
       
-      // Add sentence count aligned to the right on the first line
       doc.text(countText, pageWidth - margin - 5, yPosition, { align: 'right' });
       
       yPosition += (wrappedCategory.length * 5) + 2;
       categoryIndex++;
     }
 
-    // ============ CATEGORY CONTENT PAGES ============
     addNewPage();
 
     categoryIndex = 1;
     for (const [category, sentences] of sortedCategories) {
-      // Store the page where this category starts
       categoryPages[category] = doc.internal.getNumberOfPages();
       
-      // Check if we need a new page for category header
       if (yPosition > pageHeight - 50) {
         addNewPage();
         categoryPages[category] = doc.internal.getNumberOfPages();
       }
 
-      // Category Header (Bold)
       doc.setFontSize(14);
       doc.setFont(undefined, 'bold');
       const categoryTitle = `${categoryIndex}. ${category}`;
       
-      // Wrap the title if it's too long
       const wrappedTitle = doc.splitTextToSize(categoryTitle, contentWidth - 30);
       doc.text(wrappedTitle, margin, yPosition);
       
@@ -363,26 +462,21 @@ function downloadAsPDF() {
       
       yPosition += titleHeight + 2;
       
-      // Draw a line under the category
       doc.setDrawColor(0, 0, 0);
       doc.line(margin, yPosition, pageWidth - margin, yPosition);
       yPosition += 8;
 
-      // Sentences
       doc.setFontSize(12);
       doc.setFont(undefined, 'bold');
       
       sentences.forEach((sentence, idx) => {
-        // Check if we need a new page
         if (yPosition > pageHeight - 35) {
           addNewPage();
         }
 
-        // Sentence number
         const sentenceNum = `${idx + 1}.`;
         doc.text(sentenceNum, margin, yPosition);
         
-        // Sentence text with proper wrapping
         const textX = margin + 10;
         const wrapped = doc.splitTextToSize(sentence, contentWidth - 10);
         doc.text(wrapped, textX, yPosition);
@@ -390,17 +484,15 @@ function downloadAsPDF() {
         yPosition += (wrapped.length * 6.5) + 3;
       });
       
-      yPosition += 8; // Space after category
+      yPosition += 8;
       categoryIndex++;
     }
 
-    // ============ UPDATE TABLE OF CONTENTS LINKS ============
     tocEntries.forEach(entry => {
       const targetPage = categoryPages[entry.category];
       if (targetPage) {
         doc.setPage(entry.tocPage);
         
-        // Calculate available width for category name
         const sentences = categorizedSentences[entry.category];
         const countText = `(${sentences.length} sentences)`;
         doc.setFontSize(10);
@@ -408,22 +500,17 @@ function downloadAsPDF() {
         const countWidth = doc.getTextWidth(countText);
         const availableWidth = contentWidth - countWidth - 10;
         
-        // Create the clickable link - use the original string, not the wrapped array
-        doc.setTextColor(0, 0, 255); // Blue color for links
+        doc.setTextColor(0, 0, 255);
         
         const linkText = `${entry.index}. ${entry.category}`;
         
-        // Check if text needs wrapping
         const textWidth = doc.getTextWidth(linkText);
         
         if (textWidth <= availableWidth) {
-          // Text fits on one line - use textWithLink directly
           doc.textWithLink(linkText, margin + 5, entry.tocY, { 
             pageNumber: targetPage
           });
         } else {
-          // Text is too long - truncate or use multiple lines without links
-          // Option 1: Truncate with ellipsis
           let truncated = linkText;
           while (doc.getTextWidth(truncated + '...') > availableWidth && truncated.length > 10) {
             truncated = truncated.slice(0, -1);
@@ -435,11 +522,10 @@ function downloadAsPDF() {
           });
         }
         
-        doc.setTextColor(0, 0, 0); // Reset to black
+        doc.setTextColor(0, 0, 0);
       }
     });
 
-    // Go back to last page to ensure proper page count
     doc.setPage(doc.internal.getNumberOfPages());
 
     doc.save('categorized_sentences.pdf');
@@ -470,12 +556,10 @@ async function startProcessing() {
 
     if (allSentences.length === 0) throw new Error('No sentences found in PDF');
 
-    // Use predefined categories
-    categories = PREDEFINED_CATEGORIES;
+    categories = await discoverCategories(apiKey, allSentences);
     document.getElementById('totalCategories').textContent = categories.length;
-    updateProgress(5, `Using ${categories.length} predefined categories`);
+    updateProgress(8, `Discovered ${categories.length} categories`);
 
-    // Initialize categorized sentences object
     categorizedSentences = {};
     categories.forEach(cat => categorizedSentences[cat] = []);
 
@@ -490,7 +574,6 @@ async function startProcessing() {
       batch.forEach((sentence, idx) => {
         let category = batchCategories[idx];
         
-        // Validate that the category is one of our predefined categories
         if (!category || !categories.includes(category)) {
           console.warn(`Invalid category "${category}" for sentence: ${sentence.substring(0, 50)}...`);
           category = 'Uncategorized';
@@ -505,6 +588,8 @@ async function startProcessing() {
       document.getElementById('processedCount').textContent = end;
       await new Promise(res => setTimeout(res, 1000));
     }
+
+    categorizedSentences = await verifyAndCorrectCategorization(apiKey, categorizedSentences, categories);
 
     displayResults();
   } catch (error) {

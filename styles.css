@@ -123,6 +123,18 @@ input:focus {
   display: none;
 }
 
+.download-buttons-top {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+.download-buttons-top .btn {
+  width: auto;
+  flex: 1;
+  margin-top: 0;
+}
+
 .category {
   background: #f8f9fa;
   padding: 20px;
@@ -146,7 +158,6 @@ input:focus {
 
 .download-btn {
   background: #28a745;
-  margin-top: 20px;
 }
 
 .download-btn:hover:not(:disabled) {
